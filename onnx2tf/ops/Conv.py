@@ -521,15 +521,50 @@ def make_node(
             # DepthwiseConv2D
             ### Overall model
             strides = [1] + strides + [1]
+            # tf_layers_dict[graph_node_output.name]['tf_node'] = \
+            #     tf.add(
+            #         tf.nn.depthwise_conv2d(
+            #             input=input_tensor,
+            #             filter=input_weights,
+            #             padding=pad_mode,
+            #             strides=strides,
+            #             dilations=dilations,
+            #         ),
+            #         input_bias,
+            #     )
+            # If dilations and strides are specified >1 at the same time
+            # and there is an error in the size of the trailing pixel,
+            # padding is used to compensate for the error.
+            # https://github.com/PINTO0309/onnx2tf/issues/251
+            tmp_conv = tf.nn.depthwise_conv2d(
+                input=input_tensor,
+                filter=input_weights,
+                padding=pad_mode,
+                strides=strides,
+                dilations=dilations,
+            )
+            tmp_onnxconv_output_spartial_shape = output_tensor_shape[2:4]
+            tmp_tfconv_output_spartial_shape = tmp_conv.shape[1:3]
+            if tmp_onnxconv_output_spartial_shape != tmp_tfconv_output_spartial_shape:
+                tmp_spartial_padding = [os - ts for os, ts in zip(tmp_onnxconv_output_spartial_shape, tmp_tfconv_output_spartial_shape)]
+                tmp_padding = \
+                    [
+                        [0, 0], \
+                        [tmp_spartial_padding[0], 0], \
+                        [tmp_spartial_padding[1], 0], \
+                        [0, 0]
+                    ]
+                tmp_conv = tf.pad(input_tensor, paddings=tmp_padding)
+                tmp_conv = tf.nn.depthwise_conv2d(
+                    input=tmp_conv,
+                    filter=input_weights,
+                    padding=pad_mode,
+                    strides=strides,
+                    dilations=dilations,
+                )
             tf_layers_dict[graph_node_output.name]['tf_node'] = \
                 tf.add(
-                    tf.nn.depthwise_conv2d(
-                        input=input_tensor,
-                        filter=input_weights,
-                        padding=pad_mode,
-                        strides=strides,
-                        dilations=dilations,
-                    ),
+                    tmp_conv,
                     input_bias,
                 )
             tf_op_type = tf.nn.depthwise_conv2d
